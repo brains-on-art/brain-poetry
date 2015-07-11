@@ -3,6 +3,8 @@
 import sys
 import time
 import numpy as np
+import scipy.signal
+import matplotlib.mlab as mlab
 from midas.node import BaseNode, lsl
 from midas import utilities as mu
 
@@ -26,39 +28,16 @@ class IAFNode(BaseNode):
     # access the class attributes. This enables some additional functionality.
     def metric_iaf(self, x):
         """ Returns the mean of the input vector calculated from the data. """
-        a = 10
-        return a
-
-    def _fast_psd(self, data):
-
-        # Computes a fast PSD for the input (1D) data
-
-        num_freqs = len(self.frequencies)
-
-        # Window the signal and calculate FFT
-        windowed_data = self.window_values * data
-        fx = np.fft.fft(windowed_data, n=self.NFFT)
-
-        # Calculate power
-        psd = (np.conjugate(fx[:num_freqs]) * fx[:num_freqs]).real
-
-        # Scale the spectrum by the norm of the window to compensate for
-        # windowing loss; see Bendat & Piersol Sec 11.5.2.
-        psd /= self.window_scale
-
-        # Also include scaling factors for one-sided densities and dividing by
-        # the
-        # sampling frequency, if desired. Scale everything, except the DC
-        # component
-        # and the NFFT/2 component:
-        psd[1:-1] *= 2.0  # self.scaling_factor
-
-        # MATLAB divides by the sampling frequency so that density function
-        # has units of dB/Hz and can be integrated by the plotted frequency
-        # values. Perform the same scaling here.
-        psd /= EEG_SAMPLING_RATE
-
-        return psd
+        data = np.asarray(x['data'])
+        iaf = [10.0] * data.shape[0]
+        for ch, ch_data in enumerate(data):
+            pxx, freqs = mlab.psd(ch_data, Fs=128.0, NFFT=256)
+            alpha_mask = np.abs(freqs - 10) <= 2.0
+            alpha_pxx = 10*np.log10(pxx[alpha_mask])
+            alpha_pxx = scipy.signal.detrend(alpha_pxx)
+            #iaf[ch] = alpha_pxx.shape
+            iaf[ch] = freqs[alpha_mask][np.argmax(alpha_pxx)]
+        return iaf
 
 
 # ------------------------------------------------------------------------------
