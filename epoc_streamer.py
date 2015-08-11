@@ -8,6 +8,7 @@ import numpy as np
 import gevent
 import pyudev
 from midas.node import lsl
+import socket
 
 EEG_SAMPLING_RATE = 128
 NUM_EEG_CHANNELS  = 14
@@ -38,24 +39,24 @@ class EPOC:
             self.name = serial_number
         else:
             self.name = name
-         
+
         # Open device
         #self.hidraw = os.open(device_node, os.O_RDONLY|os.O_NONBLOCK)
-         
+
         # Setup AES cipher
         sn = serial_number
         if developer_headset:
             key = ''.join([sn[-1], '\0',   sn[-2], 'H', sn[-1], '\0',   sn[-2], 'T',
                            sn[-3], '\x10', sn[-4], 'B', sn[-3], '\0',   sn[-4], 'P'])
-        else:     
+        else:
             key = ''.join([sn[-1], '\0',   sn[-2], 'T', sn[-3], '\x10', sn[-4], 'B',
                            sn[-1], '\0',   sn[-2], 'H', sn[-3], '\0',   sn[-4], 'P'])
         self.cipher = AES.new(key, AES.MODE_ECB)
-         
+
         # Define filter kernel
         #self.filter_numtaps = 64
         #self.filter_kernel = scipy.signal.firwin(self.filter_numtaps, [3.5,40.0], nyq=EEG_SAMPLING_RATE/2.0, pass_zero=False)
-         
+
         # Ring buffers for data
         #self.minimum_sample_window = minimum_time_window*EEG_SAMPLING_RATE
         #self.data    = np.ones(NUM_EEG_CHANNELS+2)
@@ -67,44 +68,55 @@ class EPOC:
         #self.quality = 0 # FIXME
         #self.data_index    = self.minimum_sample_window # Current index in data buffer
         #self.battery_index = 0 # Current index in battery buffer
-        #self.quality_index = 0 # Current index in quality buffer  
+        #self.quality_index = 0 # Current index in quality buffer
         self.worker = None
-         
+
         self.status = 'DISCONNECTED'
         self.last_packet_time = time.time()
- 
+
         #self.status_callbacks = {}
         #self.status_callbacks['DISCONNECTED'] = []
         #self.status_callbacks['NO DATA'] = []
         #self.update_callbacks = []
-         
+        self.s = None
+        while not self.s:
+            try:
+                print('Getting socket')
+                #create UDP socket for sending data
+                self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            except Exception as e:
+                continue
+                print(e)
+            print('Receiving socket found. Proceeding to meaty part of mainloop')
+        self.SENDADDR = ('localhost', 4333)
+
     def connect(self, hidraw):
         self.hidraw_path = hidraw
         self.start()
-   
+
     def disconnect(self):
         self.stop()
         self.hidraw_path = None
         self.status = 'DISCONNECTED'
         #for f in self.status_callbacks['DISCONNECTED']:
         #    f()
-         
+
     def start(self):
         print('Starting up')
         self.hidraw = os.open(self.hidraw_path, os.O_RDONLY|os.O_NONBLOCK)
         self.worker = gevent.spawn(self.run)
-         
+
     def stop(self):
         print('Stopping')
         gevent.kill(self.worker)
         os.close(self.hidraw)
-     
+
     #def register_status_callback(self, status, callback):
     #    self.status_callbacks[status].append(callback)
-        
+
     #def register_update_callback(self, callback):
     #    self.update_callbacks.append(callback)
-         
+
     def run(self):
         print('Starting run')
 
@@ -115,9 +127,9 @@ class EPOC:
         gyro    = np.zeros(2)
 
         # Create LSL outlet
-        info = lsl.StreamInfo('EPOC-' + self.name, 
-                              'EEG', 
-                              NUM_EEG_CHANNELS, 
+        info = lsl.StreamInfo('EPOC-' + self.name,
+                              'EEG',
+                              NUM_EEG_CHANNELS,
                               128,
                               'float32',
                               self.serial_number)
@@ -127,7 +139,7 @@ class EPOC:
         sample = np.zeros(NUM_EEG_CHANNELS)
         while True and self.hidraw != None:
             # Get
-            try: 
+            try:
                 raw_packet = os.read(self.hidraw, 32)
             except OSError:
                 # No packets for me! ZZzzZZ...
@@ -143,12 +155,12 @@ class EPOC:
                 assert(len(raw_packet) == 32)
 
                 #print('Encrypted data: ({}) {}'.format(type(raw_packet), raw_packet))
-                 
+
                 # Decrypt
                 data = self.cipher.decrypt(raw_packet[:16]) + self.cipher.decrypt(raw_packet[16:])
                 #print('Decrypted data: ({}) {}'.format(type(data), data))
                 #print('First value: {} {}'.format(data[0], int(data[0])))
-                 
+
                 #i = self.data_index
                 # Unpack packet counter/battery level (first byte)
                 value = data[0]
@@ -156,7 +168,7 @@ class EPOC:
                     counter = value
                     #print('Counter: {}'.format(value))
                 #    self.counter[i] = value
-                #    if value == 0: 
+                #    if value == 0:
                 #        print('1 second of data seen now at i=' + str(i))
                 #        #print self.eeg[:,i-5:i]
                 else: # Battery
@@ -171,12 +183,12 @@ class EPOC:
                 #    else:
                 #        self.battery[ind] = battery_levels[value]
                 #    self.battery_index = ind + 1 if ind < len(self.battery) - 1 else 0
-                 
+
                 # Unpack gyros
                 gyro[0] = ((data[29] << 4) | (data[31] >> 4))
                 gyro[1] = ((data[30] << 4) | (data[31] & 0x0F))
                 # TODO zero gyros
-                 
+
                 # Unpack sensors
                 for ch, bits in enumerate(sensor_bits):
                     level = 0
@@ -186,7 +198,7 @@ class EPOC:
                         level |= (data[b] >> o) & 1
                     eeg[ch] = level
                 #self.eeg[:,i] = (self.raw_eeg[:,i-self.filter_numtaps:i]*self.filter_kernel).sum(axis=1)
-                 
+
                 # We received and were able to parse the packet!
                 #for f in self.update_callbacks:
                 #    f(self.eeg[:,i])
@@ -194,15 +206,20 @@ class EPOC:
                 if self.status != 'OK':
                     self.status = 'OK'
                 outlet.push_sample(eeg)
-                     
-                 
-                #print self.data_index    
+                # Send things to processing
+                self.s.sendto(bytes('d'+','.join([str(x) for x in eeg[:5]*0.01]), 'UTF-8'),
+                              self.SENDADDR)
+
+
+
+
+                #print self.data_index
                 #if self.data_index == self.data.shape[-1] - 1:
                 #    self.raw_eeg[:,:self.minimum_sample_window] = self.raw_eeg[:,-self.minimum_sample_window:]
                 #    self.data_index = self.minimum_sample_window
                 #else:
                 #    self.data_index += 1
-                #self.data_index = i + 1 if i < self.data.shape[-1] - 1 else 64 
+                #self.data_index = i + 1 if i < self.data.shape[-1] - 1 else 64
                 #print self.data_index
 
 class EPOCManager:
@@ -210,21 +227,21 @@ class EPOCManager:
         self.devices = {}
         self.epocs = {}
         self.names = self.parse_config(config) if config != None else {}
-         
+
         self.context = pyudev.Context()
-         
+
         self.populate_devices()
         print('EPOCManager init: {} EPOCs found!'.format(len(self.devices)))
-         
+
         self.hidraw_event_queue = queue.Queue()
         self.worker = gevent.spawn(self.process_events)
-         
+
         self.monitor = pyudev.Monitor.from_netlink(self.context)
         self.monitor.filter_by('hidraw')
         self.observer = pyudev.MonitorObserver(self.monitor, self.add_event)
         self.observer.start()
-      
-             
+
+
     def parse_config(self, config):
         f = open(config, 'r')
         res = {}
@@ -235,24 +252,24 @@ class EPOCManager:
                 serial_number, name = line.strip().split()
                 res[name] = serial_number
         return res
-         
+
     def process_hidraw(self, device):
         #device_node = serial_number = None
-        device_parent = device.find_parent('usb', 'usb_device') 
+        device_parent = device.find_parent('usb', 'usb_device')
         #manufacturer  = device_parent.attributes['manufacturer'].decode('utf-8')
         if 'manufacturer' in device_parent.attributes and \
            device_parent.attributes['manufacturer'].decode('utf-8') in ['Emotiv Systems Inc.','Emotiv Systems Pty Ltd']:
-            # Each EPOC shows up as two hidraw devices. We select the one with an 
+            # Each EPOC shows up as two hidraw devices. We select the one with an
             # 'interface' descriptor in the usb_interface parent
-            interface_parent = device.find_parent('usb', 'usb_interface') 
+            interface_parent = device.find_parent('usb', 'usb_interface')
             if 'interface' in interface_parent.attributes.keys():
                 serial_number = device_parent.attributes['serial'].decode('utf-8') # Serial number needed for decrypting packets
                 return (device.device_node, serial_number)
         return None
-                 
+
     def populate_devices(self):
         hidraw_devices = [x for x in self.context.list_devices(subsystem='hidraw')]
-         
+
         for dev in hidraw_devices:
             res = self.process_hidraw(dev)
             if res != None:
@@ -262,18 +279,18 @@ class EPOCManager:
                 self.epocs[serial_number] = epoc
                 epoc.connect(hidraw_path)
                 print(serial_number, hidraw_path)
-                 
+
     def add_event(self, action, device):
         #print action, device
         self.hidraw_event_queue.put((action, device))
-                 
+
     def process_events(self):
         while True:
             try:
                 action, device = self.hidraw_event_queue.get_nowait()
             except queue.Empty:
                 gevent.sleep(0.002)
-            else:                        
+            else:
                 if action == 'add':
                     res = self.process_hidraw(device)
                     if res != None:
@@ -286,14 +303,14 @@ class EPOCManager:
                             epoc = EPOC(serial_number)
                             epoc.connect(hidraw_path)
                             self.epocs[serial_number] = epoc
-                         
+
                 if action == 'remove':
                     hidraw_path = device.device_node
                     if hidraw_path in self.devices:
                         self.epocs[self.devices[hidraw_path]].disconnect()
                         print('EPOC ({0}) at {1} removed'.format(self.devices[hidraw_path], hidraw_path))
                         del self.devices[hidraw_path]
- 
+
     def get_epoc(self,name):
         # Do we have an epoc by this name
         if name in self.names and self.names[name] in self.epocs:
@@ -307,6 +324,6 @@ class EPOCManager:
 if __name__ == "__main__":
     manager = EPOCManager()
     #epoc = manager.get_epoc('gamma')
- 
+
     while True:
         gevent.sleep(1)
