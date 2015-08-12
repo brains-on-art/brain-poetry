@@ -1,29 +1,29 @@
 #!/usr/bin/python
 # -*- coding: utf-8  -*-
 
-
-
-
+import json
+import os  
 import time
 import shelve
 import sys
 import socket
-
 import threading
-
-from Queue import Queue, Empty
-
-
-
-
+try:
+    from queue import Queue, Empty
+except ImportError: # Python2
+    from Queue import Queue, Empty
 from poem_printer import print_poem, parse_poem
 
+
 # Logging helpers FIXME: move to utility library
-file_time_str = lambda: time.strftime('%Y-%m-%d_%H:%M:%S',time.localtime())
+file_time_str = lambda: time.strftime('%Y-%m-%d_%H-%M-%S',time.localtime())
 time_str = lambda: time.strftime('%Y-%m-%d %H:%M:%S',time.localtime())
 log_msg = lambda msg: print('{}: {}'.format(time_str(), msg))
 
+# Defaults
 POEM_SERVER_PORT = 5556
+save_directory = os.path.realpath('~/brain_poetry_data/')
+
 
 class UIClient(object):
     SENDADDR = ('localhost', 4333)
@@ -53,20 +53,20 @@ class UIClient(object):
 
         while True:
             if stop_flag.is_set():
-                print('Stopping UI listen')
+                log_msg('Stopping UI listen')
                 break
             
-            print('READING BUFFER')
+            #print('READING BUFFER')
             #read the buffer
             try:
                 packet = receive_socket.recvfrom(1024)
             except socket.timeout:
                 continue
             except socket.error:
-                print('UI receiving socket error!')
+                log_msg('UI receiving socket error!')
                 break
             else:
-                print(packet)
+                log_msg('Got packet from UI: {}'.format(packet))
                 msg = packet[0]
                 if 'start' in msg:
                     lang = msg.split()[1]
@@ -95,8 +95,7 @@ class UIClient(object):
 
     
 
-def main()
-    import os          # FIXME: move me
+def main():
     import subprocess  # FIXME: move me
     
     script_directory = os.path.dirname(os.path.realpath(__file__))
@@ -104,10 +103,10 @@ def main()
     poem_server_path = os.path.join(script_directory, 'poem_server.py')
 
     # Start poem server
-    log_msg('Starting poem server subprocess on port {}...'.format(poem_server_port))
+    log_msg('Starting poem server subprocess on port {}...'.format(POEM_SERVER_PORT))
     poem_server_log = open(current_time + '_poem_server.log', 'w')
-    log_msg('  Logging poem server messages to {}'.format(poem_server_log.name)
-    poem_server = subprocess.Popen(['python3',poem_server_path, '--port', POEM_SERVER_PORT], 
+    log_msg('  Logging poem server messages to {}'.format(poem_server_log.name))
+    poem_server = subprocess.Popen(['python3', poem_server_path, '--port', str(POEM_SERVER_PORT)],
                                    stdout=poem_server_log, 
                                    stderr=subprocess.STDOUT)
 
@@ -116,9 +115,9 @@ def main()
     log_msg('Starting EPOC LSL streaming...')
     epoc_streamer_path = os.path.join(script_directory, 'epoc_streamer.py')
     epoc_streamer_log = open(current_time + '_epoc_streamer.log', 'w')
-    log_msg('  Logging EPOC streamer messages to {}'.format(epoc_streamer_log.name)
+    log_msg('  Logging EPOC streamer messages to {}'.format(epoc_streamer_log.name))
     epoc_streamer = subprocess.Popen(['python3', epoc_streamer_path], 
-                                     stdout=server_log,
+                                     stdout=epoc_streamer_log,
                                      stderr=subprocess.STDOUT)
 
     # Start MIDAS servers
@@ -126,13 +125,13 @@ def main()
     log_msg('Starting MIDAS node(s) and dispatcher...')
     iaf_node_path = os.path.join(script_directory, 'iaf_node.py')
     iaf_node_log = open(current_time + '_iaf_node.log', 'w')
-    log_msg('  Logging IAF MIDAS node messages to {}'.format(iaf_node_log.name)
+    log_msg('  Logging IAF MIDAS node messages to {}'.format(iaf_node_log.name))
     iaf_node = subprocess.Popen(['python3', iaf_node_path, node_config_path], 
                                 stdout=iaf_node_log,
                                 stderr=subprocess.STDOUT)
     dispatcher_path = os.path.join(script_directory, 'dispatcher.py')
     dispatcher_log = open(current_time + '_dispatcher.log', 'w')
-    log_msg('  Logging MIDAS dispatcher messages to {}'.format(dispatcher_log.name)
+    log_msg('  Logging MIDAS dispatcher messages to {}'.format(dispatcher_log.name))
     dispatcher = subprocess.Popen(['python3', dispatcher_path, node_config_path], 
                                   stdout=dispatcher_log,
                                   stderr=subprocess.STDOUT)
@@ -140,9 +139,9 @@ def main()
     # Start Processing UI
     log_msg('Starting Processing UI (fi/eng)')
     ui_path = os.path.join(script_directory, 'dispatcher.py')
-    processing-java --sketch=/home/boa/sketchbook/runo_viz_biling --output=/home/boa/runo_viz_biling_build/ --force --present
+    #processing-java --sketch=/home/boa/sketchbook/runo_viz_biling --output=/home/boa/runo_viz_biling_build/ --force --present
     ui_log = open(current_time + '_processing_ui.log', 'w')
-    log_msg('  Logging Processing UI messages to {}'.format(ui_log.name)
+    log_msg('  Logging Processing UI messages to {}'.format(ui_log.name))
     ui = subprocess.Popen(['processing-java', 
                            '--sketch=/home/boa/sketchbook/runo_viz_biling',
                            '--output=/home/boa/runo_viz_biling_build/',
@@ -156,7 +155,7 @@ def main()
 
     # EPOC stream
     log_msg('Getting handle on EPOC stream')
-    streams = rec.pylsl.resolve_byprop("name", 'EPOC')[0]
+    epoc_stream = rec.pylsl.resolve_byprop("name", 'EPOC')[0]
 
     # Recorder
     stream_recorder = None
@@ -166,7 +165,9 @@ def main()
     username = None
     language = 'finnish'
     start_time = None
-    stop_time = None 
+    stop_time = None
+    save_file = None
+    save = None
     while True:
         gevent.sleep(0.008)   
           
@@ -176,23 +177,43 @@ def main()
         except Empty:
             pass
         else:
-            if msg['type'] == 'start':
-                print('Processing start message: {}'.format(msg))
+            if msg['type'] == 'start':
+                log_msg('Processing start message: {}'.format(msg))
                 language = msg['language']
                 start_time = time.time()
-                start_time_str = file_time_str()
-                stream_recorder = rec.StreamRecorder('/tmp/example_recording.xdf',streams)
+
+                tmp = file_time_str()
+                save_file = open(os.path.join(save_directory, tmp + '_metadata.json'), 'w')
+                save = {}
+                save['time_str'] = tmp                
+                stream_recorder = rec.StreamRecorder(os.path.join(save_directory, tmp + '_eeg.xcf'), epoc_stream)
+                stream_recorder.start_recording()
+
                 state = 'collect'
                 log_msg('Switched to state: {}'.format(state))
             elif msg['type'] == 'name':
-                print('Processing name message: {}'.format(msg))
+                log_msg('Processing name message: {}'.format(msg))
                 username = msg['name']
             elif msg['type'] == 'print':
-                print('Processing print message: {}'.format(msg))
+                log_msg('Processing print message: {}'.format(msg))
                 print_thr = threading.Thread(target=print_poem, args=(poem,username,))
                 print_thr.daemon = True
                 print_thr.start()
             elif msg['type'] == 'done':
+                save['start_time'] = start_time
+                save['stop_time'] = stop_time
+                save['username'] = username
+                save['language'] = language
+                save['poem'] = poem
+                save['eeg_data_file'] = stream_recorder.f.name
+                json.dumps(save, save_file)
+                save = None
+
+                save_file.close()
+                stream_recorder.end_recording()
+                save_file = None
+                stream_recorder = None
+
                 username = None
                 language = 'finnish'
                 poem = None
@@ -207,7 +228,7 @@ def main()
         if state == 'idle': #waiting for a new customer
             continue
 
-        elif state == 'collect'
+        elif state == 'collect':
             stop_time = time.time()
             if stop_time - start_time > 5: # Collection time in seconds
                 log_msg('Collected sufficient data')
