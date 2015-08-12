@@ -284,9 +284,19 @@ void drawData(float strokeColor, float alpha) {
   stroke(strokeColor, alpha); 
   float hmod = height/(channels.length*2); //hmod controls the scale and position of the channels (assume -1<data<1)
   float drawH = hmod;
+  float val1 = 0;
+  float val2 = 0;
+  float curr_max = 0;
+  float curr_min = 0;
   for (int ch=0; ch<channels.length; ch++) {
+    curr_max = channels[ch].get_max(); 
+    curr_min = channels[ch].get_min();
     for (int i=0; i<channels[ch].size()-1; i++) {
-      line(leftHorMargin+i, drawH+(channels[ch].get(i)*hmod), leftHorMargin+i+1, drawH+(channels[ch].get(i+1)*hmod));
+      
+      val1 = map(channels[ch].get(i), curr_min, curr_max, -1, 1);
+      val2 = map(channels[ch].get(i+1), curr_min, curr_max, -1, 1);
+      //line(leftHorMargin+i, drawH+(channels[ch].get(i)*hmod), leftHorMargin+i+1, drawH+(channels[ch].get(i+1)*hmod));
+      line(leftHorMargin+i, drawH+(val1*hmod), leftHorMargin+i+1, drawH+(val2*hmod));
     }
     drawH += 2*hmod;
   }
@@ -422,7 +432,6 @@ void keyReleased() {
  */
 void receive( byte[] packet, String ip, int port ) {  // <-- extended handler
   // get the "real" message =
- 
 
 
 
@@ -433,10 +442,9 @@ void receive( byte[] packet, String ip, int port ) {  // <-- extended handler
   
   // data = subset(data, 0, data.length-2);
   String message = new String( packet );
+  
   //println( "receive: \""+message+"\" from "+ip+" on port "+port );
   
-  //println(message);
-
   //if we're in data-gathering states, collect all data into one array
   if (message.substring(0, 1).equals("d")) {
     //data.add(Float.parseFloat(message.substring(1)));
@@ -467,6 +475,8 @@ public class RingBuffer {
   ArrayList<Float> l;
   int oldest;
   int capacity;
+  float current_min=0;
+  float current_max=0;
 
   public RingBuffer(int maxcapacity) {
     l = new ArrayList<Float>();
@@ -498,12 +508,20 @@ public class RingBuffer {
 
   public void add(float v) {
     //println("Adding, oldest == " + oldest);
+    
     l.set(oldest, v);
     if (oldest == capacity-1) {
       oldest = 0;
       return;
     }
     oldest++;
+  }
+  
+  public float get_min(){
+    return Collections.min(l);
+  }
+  public float get_max(){
+    return Collections.max(l);
   }
 
   public int size() {
