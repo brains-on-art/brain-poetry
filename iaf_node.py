@@ -19,6 +19,7 @@ class IAFNode(BaseNode):
         """ Initialize example node. """
         super().__init__(*args)
         self.metric_functions.append(self.metric_iaf)
+        self.metric_functions.append(self.metric_iaf_binned)
 
     def metric_iaf(self, x):
         """ Returns the IAF vector calculated from the input data x """
@@ -33,7 +34,23 @@ class IAFNode(BaseNode):
             iaf[ch] = freqs[alpha_mask][np.argmax(alpha_pxx)]
         return iaf
 
-
+    def metric_iaf_binned(self, x, bins=10):
+        """ Returns the mean IAF and its bin number (1-indexed) from the input data x """ 
+        data = np.asarray(x['data'])
+        iaf = [10.0] * data.shape[0]
+        for ch, ch_data in enumerate(data):
+            pxx, freqs = mlab.psd(ch_data, Fs=128.0, NFFT=256)
+            alpha_mask = np.abs(freqs - 10) <= 2.0
+            alpha_pxx = 10*np.log10(pxx[alpha_mask])
+            alpha_pxx = scipy.signal.detrend(alpha_pxx)
+            # iaf[ch] = alpha_pxx.shape
+            iaf[ch] = freqs[alpha_mask][np.argmax(alpha_pxx)]
+        iaf = iaf.mean()
+        bin = np.digitize((iaf,), np.linspace(8,12, bins+1))
+        return (bin, iaf)
+        
+        
+        
 # ------------------------------------------------------------------------------
 # Run the node if started from the command line
 # ------------------------------------------------------------------------------

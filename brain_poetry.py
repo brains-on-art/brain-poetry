@@ -7,11 +7,13 @@ import time
 import shelve
 import sys
 import socket
+import requests
 import threading
 try:
     from queue import Queue, Empty
 except ImportError: # Python2
     from Queue import Queue, Empty
+from numpy import mean, digitize
 from poem_printer import print_poem, parse_poem
 
 
@@ -93,10 +95,21 @@ class UIClient(object):
                     message['type'] = 'print'
                     receive_q.put(message)
 
-    
+
+#req = 'http://127.0.0.1:8080/status/nodes'
+def get_iaf():
+    addr = 'http://127.0.0.1:8080'
+    request = ('/iaf_node/metric/'
+               '{"type":"metric_iaf",'
+               '"channels":["F3", "FC5", "AF3"],'
+               '"time_window":[10]}')
+    return requests.get(addr + request).json()[0]['return'])
+ 
 
 def main():
     import subprocess  # FIXME: move me
+
+    
     
     script_directory = os.path.dirname(os.path.realpath(__file__))
     current_time     = file_time_str()
@@ -232,8 +245,10 @@ def main():
             stop_time = time.time()
             if stop_time - start_time > 5: # Collection time in seconds
                 log_msg('Collected sufficient data')
-                GET_IAF # FIXME
-                poem_client.generate_poem(language, IAF) # FIXME
+            	category, iaf = get_iaf()
+                poem_client.generate_poem(language, category) # FIXME
+                save['category'] = category
+                save['iaf'] = iaf
                 state = 'generate' 
                 log_msg('Switched to state: {}'.format(state))
 

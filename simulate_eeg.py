@@ -8,7 +8,7 @@ import signal
 import time
 from lsltools.sim import EEGData
 
-# Refactor to avoid globals
+# FIXME: Refactor to avoid globals
 running = True
 def signal_handler(signal, frame):
     global running
