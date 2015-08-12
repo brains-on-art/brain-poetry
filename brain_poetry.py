@@ -47,7 +47,7 @@ class UIClient(object):
         self.stop_flag.set()
 
     def send_poem(self, poem_dict):
-        log_msg('Sending poem')
+        log_msg('Sending poem {}'.format(poem_dict['poem']))
         viz_poem = parse_poem(poem_dict['poem'])
         self.send_socket.sendto(('p'+viz_poem).encode('utf-8'), self.SENDADDR)
 
@@ -106,7 +106,7 @@ def get_iaf_binned():
     addr = 'http://127.0.0.1:8080'
     request = ('/iaf_node/metric/'
                '{"type":"metric_iaf_binned",'
-               '"channels":["F3", "FC5", "AF3"],'
+               '"channels":["F3", "F4", "AF3", "AF4", "F7", "F8"],'
                '"time_window":[10]}')
     result = requests.get(addr + request).json()[0]['return']
     log_msg('Got result: {}'.format(result))
@@ -128,13 +128,14 @@ def main():
     
     script_directory = os.path.dirname(os.path.realpath(__file__))
     current_time     = file_time_str()
-    poem_server_path = os.path.join(script_directory, 'poem_server.py')
+    poem_server_path = os.path.join('/home/boa/Desktop/Runokoneistoa/Apparatus', 'poem_server.py')
 
     # Start poem server
     log_msg('Starting poem server subprocess on port {}...'.format(POEM_SERVER_PORT))
     poem_server_log = open(current_time + '_poem_server.log', 'w')
     log_msg('  Logging poem server messages to {}'.format(poem_server_log.name))
-    poem_server = subprocess.Popen(['python3', poem_server_path, '--port', str(POEM_SERVER_PORT)],
+    poem_server = subprocess.Popen(['python2', poem_server_path, '--port', str(POEM_SERVER_PORT)],
+                                   cwd='/home/boa/Desktop/Runokoneistoa/Apparatus/',
                                    stdout=poem_server_log, 
                                    stderr=subprocess.STDOUT)
 
@@ -199,6 +200,7 @@ def main():
     stop_time = None
     save_file = None
     save = None
+    prev_poem_request = None
     while running:
         time.sleep(0.008)   
           
@@ -228,7 +230,7 @@ def main():
             elif msg['type'] == 'print':
                 log_msg('Processing print message: {}'.format(msg))
                 print_thr = threading.Thread(target=print_poem,
-                                             args=(poem,username,))
+                                             args=(poem['poem'],username,))
                 print_thr.daemon = True
                 print_thr.start()
             elif msg['type'] == 'done':
@@ -238,7 +240,7 @@ def main():
                 save['language'] = language
                 save['poem'] = poem
                 save['eeg_data_file'] = stream_recorder.f.name
-                json.dumps(save, save_file)
+                json.dump(save, save_file)
                 save = None
 
                 save_file.close()
@@ -252,6 +254,7 @@ def main():
                 start_time = None
                 stop_time = None
                 stream_recorder = None
+                prev_poem_request = None
                 state = 'idle'
                 log_msg('Switched to state: {}'.format(state))
 
@@ -274,7 +277,9 @@ def main():
                 log_msg('Switched to state: {}'.format(state))
 
         elif state == 'generate':
-            if poem is None:
+            # Request poems at most 1 Hz
+            if poem is None and (prev_poem_request is None or time.time() - prev_poem_request > 1.0) :
+                prev_poem_request = time.time()
                 log_msg('Attempting to get poem')
                 resp = poem_client.get_poem()
                 if resp['type'] == 'poem':
@@ -294,11 +299,13 @@ def main():
     if stream_recorder is not None:
         stream_recorder.end_recording()
         stream_recorder = None
+    if save_file is not None:
+        save_file.close()
     time.sleep(2)
     poem_server.send_signal(signal.SIGTERM)
-    epoc_streamer.send_signal(signal.SIGTERM)
     iaf_node.send_signal(signal.SIGTERM)
     dispatcher.send_signal(signal.SIGTERM)
+    epoc_streamer.send_signal(signal.SIGTERM)
     ui_proc.send_signal(signal.SIGTERM)
     ui.close()
     

@@ -18,6 +18,8 @@ def parse_poem(raw_poem, linewidth=50, indent='       '):
 
 
 def print_poem(raw_poem, username):
+    print('Raw poem: {}'.format(raw_poem))
+    print('Username: {}'.format(username))
     ser = serial.Serial('/dev/ttyACM0', baudrate=9600, timeout=3.0)
     time.sleep(2.0)
 

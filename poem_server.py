@@ -1,3 +1,4 @@
+from __future__ import print_function
 import argparse
 import signal
 from threading import Thread
@@ -18,7 +19,7 @@ log_msg = lambda msg: print('{}: {}'.format(time_str(), msg))
 
 # FIXME: NYT OIKEESTI!!!
 import sys
-sys.path.append('../../apparatus/apparatus/')
+#sys.path.append('../../apparatus/apparatus/')
 try:
     from generate_poem import generate as get_poem_fi
 except ImportError:
