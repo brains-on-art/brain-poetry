@@ -8,6 +8,7 @@ import time
 import shelve
 import sys
 import socket
+import requests
 
 import threading
 
@@ -98,6 +99,13 @@ class UIClient(object):
 def main()
     import os          # FIXME: move me
     import subprocess  # FIXME: move me
+
+    req = 'http://127.0.0.1:8080/status/nodes'
+    addr = 'http://127.0.0.1:8080'
+    request = ('/iaf_node/metric/'
+               '{"type":"metric_iaf",'
+               '"channels":["F3", "FC5", "AF3"],'
+               '"time_window":[10]}')
     
     script_directory = os.path.dirname(os.path.realpath(__file__))
     current_time     = file_time_str()
@@ -211,7 +219,8 @@ def main()
             stop_time = time.time()
             if stop_time - start_time > 5: # Collection time in seconds
                 log_msg('Collected sufficient data')
-                GET_IAF # FIXME
+            	IAF = requests.get(addr + request).json()[0]['return'])
+				IAF = np.mean(IAF)
                 poem_client.generate_poem(language, IAF) # FIXME
                 state = 'generate' 
                 log_msg('Switched to state: {}'.format(state))
