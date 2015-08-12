@@ -127,7 +127,7 @@ class EPOC:
         gyro    = np.zeros(2)
 
         # Create LSL outlet
-        info = lsl.StreamInfo('EPOC-' + self.name,
+        info = lsl.StreamInfo('EPOC', #'EPOC-' + self.name,
                               'EEG',
                               NUM_EEG_CHANNELS,
                               128,

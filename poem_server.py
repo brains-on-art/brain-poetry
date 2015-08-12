@@ -65,39 +65,39 @@ class PoemServer(object):
         response = {}
         response['type']    = response_type
         response['message'] = message
-        response['request'] = request
+        response['request'] = originating_request
         return response
 
     # Send error response
-    def send_error(self, socket, originating_request):
-        error = create_response('error', 'Bad request', originating_request)
+    def send_error(self, originating_request):
+        error = self.create_response('error', 'Bad request', originating_request)
         log_msg('Sending error message: {}'.format(error))
-        socket.send_json(error)
+        self.socket.send_json(error)
 
     # Send acknowledge response
-    def send_ack(self, socket, originating_request):
-        ack = create_response('acknowledge', 'Request acknowledged', originating_request)
+    def send_ack(self, originating_request):
+        ack = self.create_response('acknowledge', 'Request acknowledged', originating_request)
         log_msg('Sending acknowledge: {}'.format(ack))
-        socket.send_json(ack)
+        self.socket.send_json(ack)
 
     # Send poem response
-    def send_poem(self, socket, originating_request, poem, category):
-        poem = create_response('poem', 'Poem generated', originating_response)
-        poem['poem']     = poem
+    def send_poem(self, originating_request, poem_text, category):
+        poem = self.create_response('poem', 'Poem generated', originating_request)
+        poem['poem']     = poem_text
         poem['category'] = category
         log_msg('Sending poem: {}'.format(poem))
-        socket.send_json(poem)
+        self.socket.send_json(poem)
 
     # Send API response
-    def send_api(self, socket, originating_request):
-        api = create_response('api_info', 'API information', originating_request)
+    def send_api(self, originating_request):
+        api = self.create_response('api_info', 'API information', originating_request)
         api['available_commands']   = ['generate_poem', 'get_api', 'get_poem', 'help']
         api['available_languages']  = generators.keys()
         api['available_categories'] = categories
         api['api_version']          = API_VERSION
         api['api_date']             = API_DATE
         log_msg('Sending API: {}'.format(api))
-        socket.send_json(api)
+        self.socket.send_json(api)
 
     # Check request validity
     def check_request(self, request):
@@ -116,9 +116,9 @@ class PoemServer(object):
         return good 
 
     def process(self, request):
-        if check_request(request): # Good request?
+        if self.check_request(request): # Good request?
             if request == {} or request['command'] in ['get_api', 'help']:
-                send_api(socket, request)
+                self.send_api(request)
             elif request['command'] == 'generate_poem': 
                 log_msg('Starting to generate poem in {} category {}'.format(request['language'], 
                                                                              request['category']))
@@ -126,7 +126,7 @@ class PoemServer(object):
                                      args=[request['language'], 
                                            request['category']])
                 poemgen_thr.start()
-                send_ack(socket, request)
+                self.send_ack(request)
             # FIXME: Should we send an error if a get request comes without
             #        a generate request?
             elif request['command'] == 'get_poem': 
@@ -138,11 +138,11 @@ class PoemServer(object):
                     pass
                 
                 if category is not None and poem is not None:
-                    send_poem(socket, request, poem, category)
+                    self.send_poem(request, poem, category)
                 else:
-                    send_ack(socket, request)               
+                    self.send_ack(request)               
         else:
-            send_error(socket, request)
+            self.send_error(request)
 
 
 
@@ -166,7 +166,7 @@ def server(port):
     socket.bind("tcp://127.0.0.1:{}".format(port))
 
     # Create poem server on socket
-    server = PoemServer(socket)
+    poem_server = PoemServer(socket)
     
     # Main loop
     while running:
@@ -176,7 +176,7 @@ def server(port):
         except zmq.ZMQError as e: 
             request = None
         if request is not None:
-            log_msg('Received request: {}'.format(message))
+            log_msg('Received request: {}'.format(request))
             poem_server.process(request)
         time.sleep(0.1)
     

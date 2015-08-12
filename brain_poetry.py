@@ -8,12 +8,16 @@ import shelve
 import sys
 import socket
 import requests
+import signal
 import threading
+from lsltools import rec
+
 try:
     from queue import Queue, Empty
 except ImportError: # Python2
     from Queue import Queue, Empty
 from numpy import mean, digitize
+from poem_client import PoemClient
 from poem_printer import print_poem, parse_poem
 
 
@@ -24,7 +28,7 @@ log_msg = lambda msg: print('{}: {}'.format(time_str(), msg))
 
 # Defaults
 POEM_SERVER_PORT = 5556
-save_directory = os.path.realpath('~/brain_poetry_data/')
+save_directory = os.path.realpath('/home/boa/brain_poetry_data/')
 
 
 class UIClient(object):
@@ -32,8 +36,8 @@ class UIClient(object):
     RECVADDR = ('localhost', 4332)
 
     def __init__(self):
-        self.stop_flag = thread.Event()
-        self.receive_thread = threading.Thread(target=wait_for_msg, args=(self.stop_flag,))
+        self.stop_flag = threading.Event()
+        self.receive_thread = threading.Thread(target=self.receive_messages, args=(self.stop_flag,))
         self.receive_thread.start()
         self.receive_q = Queue()
 
@@ -43,8 +47,9 @@ class UIClient(object):
         self.stop_flag.set()
 
     def send_poem(self, poem_dict):
-        viz_poem = parse_poem(poem)
-        send_socket.sendto(('p'+viz_poem).encode('utf-8'), SENDADDR)
+        log_msg('Sending poem')
+        viz_poem = parse_poem(poem_dict['poem'])
+        self.send_socket.sendto(('p'+viz_poem).encode('utf-8'), self.SENDADDR)
 
     def receive_messages(self, stop_flag):
         log_msg('Starting to listen for messages from UI')
@@ -70,46 +75,56 @@ class UIClient(object):
             else:
                 log_msg('Got packet from UI: {}'.format(packet))
                 msg = packet[0]
-                if 'start' in msg:
+                if b'start' in msg:
                     lang = msg.split()[1]
-                    language = 'finnish' if lang == '0' else 'english' # FIXME
+                    language = 'finnish' if lang == b'0' else 'english' # FIXME
                     message = {}
                     message['msg'] = msg
                     message['type'] = 'start'
                     message['language'] = language
-                    receive_q.put(message)
-                elif msg[0] == 'n':
+                    self.receive_q.put(message)
+                elif msg[0] == ord('n'):
                     message = {}
                     message['msg'] = msg
                     message['type'] = 'name'
                     message['name'] = msg[1:].decode('utf-8')
-                    receive_q.put(message)
-                elif msg == 'done':
+                    self.receive_q.put(message)
+                elif msg == b'done':
                     message = {}
                     message['msg'] = msg
                     message['type'] = 'done'
-                    receive_q.put(message)
-                elif msg == 'print':
+                    self.receive_q.put(message)
+                elif msg == b'print':
                     message = {}
                     message['msg'] = msg
                     message['type'] = 'print'
-                    receive_q.put(message)
+                    self.receive_q.put(message)
 
 
-#req = 'http://127.0.0.1:8080/status/nodes'
-def get_iaf():
+def get_iaf_binned():
+    log_msg('In get_iaf_binned')
     addr = 'http://127.0.0.1:8080'
     request = ('/iaf_node/metric/'
-               '{"type":"metric_iaf",'
+               '{"type":"metric_iaf_binned",'
                '"channels":["F3", "FC5", "AF3"],'
                '"time_window":[10]}')
-    return requests.get(addr + request).json()[0]['return'])
+    result = requests.get(addr + request).json()[0]['return']
+    log_msg('Got result: {}'.format(result))
+    return result
  
+# FIXME: global running flag for SIGINT detection
+running = True
 
 def main():
     import subprocess  # FIXME: move me
 
-    
+    # Handle SIGINT
+    def signal_handler(signal, frame):
+        global running
+        log_msg('Received SIGINT/SIGTERM, quitting...')
+        running = False
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     script_directory = os.path.dirname(os.path.realpath(__file__))
     current_time     = file_time_str()
@@ -139,13 +154,13 @@ def main():
     iaf_node_path = os.path.join(script_directory, 'iaf_node.py')
     iaf_node_log = open(current_time + '_iaf_node.log', 'w')
     log_msg('  Logging IAF MIDAS node messages to {}'.format(iaf_node_log.name))
-    iaf_node = subprocess.Popen(['python3', iaf_node_path, node_config_path], 
+    iaf_node = subprocess.Popen(['python3', iaf_node_path, node_config_path, 'iaf_node'],
                                 stdout=iaf_node_log,
                                 stderr=subprocess.STDOUT)
     dispatcher_path = os.path.join(script_directory, 'dispatcher.py')
     dispatcher_log = open(current_time + '_dispatcher.log', 'w')
     log_msg('  Logging MIDAS dispatcher messages to {}'.format(dispatcher_log.name))
-    dispatcher = subprocess.Popen(['python3', dispatcher_path, node_config_path], 
+    dispatcher = subprocess.Popen(['python3', dispatcher_path, node_config_path, 'dispatcher'],
                                   stdout=dispatcher_log,
                                   stderr=subprocess.STDOUT)
 
@@ -155,13 +170,15 @@ def main():
     #processing-java --sketch=/home/boa/sketchbook/runo_viz_biling --output=/home/boa/runo_viz_biling_build/ --force --present
     ui_log = open(current_time + '_processing_ui.log', 'w')
     log_msg('  Logging Processing UI messages to {}'.format(ui_log.name))
-    ui = subprocess.Popen(['processing-java', 
-                           '--sketch=/home/boa/sketchbook/runo_viz_biling',
-                           '--output=/home/boa/runo_viz_biling_build/',
-                           '--force',
-                           '--present'],
-                          stdout=ui_log, 
-                          stderr=subprocess.STDOUT)
+    ui_proc = subprocess.Popen(['processing-java', 
+                                '--sketch=/home/boa/sketchbook/processing_fi_en',
+                                '--output=/home/boa/processing_fi_en_build/',
+                                '--force',
+                                '--present'],
+                               stdout=ui_log, 
+                               stderr=subprocess.STDOUT)
+    # Poem client
+    poem_client = PoemClient()
 
     # Initialize connection with visualization
     ui = UIClient()
@@ -177,12 +194,13 @@ def main():
     state = 'idle'
     username = None
     language = 'finnish'
+    poem = None
     start_time = None
     stop_time = None
     save_file = None
     save = None
-    while True:
-        gevent.sleep(0.008)   
+    while running:
+        time.sleep(0.008)   
           
         # See if we have messages from Processing, decipher them and set state accordingly
         try:
@@ -198,8 +216,8 @@ def main():
                 tmp = file_time_str()
                 save_file = open(os.path.join(save_directory, tmp + '_metadata.json'), 'w')
                 save = {}
-                save['time_str'] = tmp                
-                stream_recorder = rec.StreamRecorder(os.path.join(save_directory, tmp + '_eeg.xcf'), epoc_stream)
+                save['time_str'] = tmp
+                stream_recorder = rec.StreamRecorder(os.path.join(save_directory, tmp + '_eeg.xdf'), [epoc_stream])
                 stream_recorder.start_recording()
 
                 state = 'collect'
@@ -209,7 +227,8 @@ def main():
                 username = msg['name']
             elif msg['type'] == 'print':
                 log_msg('Processing print message: {}'.format(msg))
-                print_thr = threading.Thread(target=print_poem, args=(poem,username,))
+                print_thr = threading.Thread(target=print_poem,
+                                             args=(poem,username,))
                 print_thr.daemon = True
                 print_thr.start()
             elif msg['type'] == 'done':
@@ -245,8 +264,10 @@ def main():
             stop_time = time.time()
             if stop_time - start_time > 5: # Collection time in seconds
                 log_msg('Collected sufficient data')
-            	category, iaf = get_iaf()
-                poem_client.generate_poem(language, category) # FIXME
+                category, iaf = get_iaf_binned()
+                log_msg('Generating poem for category {} (IAF = {})'.format(category, iaf))
+                res = poem_client.generate_poem(language, category) # FIXME
+                log_msg('Received response: {}'.format(res))
                 save['category'] = category
                 save['iaf'] = iaf
                 state = 'generate' 
@@ -254,11 +275,13 @@ def main():
 
         elif state == 'generate':
             if poem is None:
-                tmp = poem_client.get_poem()
-                if rep['type'] == 'poem':
-                    poem = rep
-            
-            if poem is not None and username is not None:
+                log_msg('Attempting to get poem')
+                resp = poem_client.get_poem()
+                if resp['type'] == 'poem':
+                    poem = resp
+                    log_msg('Got poem: {}'.format(poem))
+
+            if (poem is not None) and (username is not None):
                 log_msg('Sending poem to visualization')
                 ui.send_poem(poem)
                 state = 'done'
@@ -268,11 +291,16 @@ def main():
             continue
 
     # Shut down everything...
+    if stream_recorder is not None:
+        stream_recorder.end_recording()
+        stream_recorder = None
+    time.sleep(2)
     poem_server.send_signal(signal.SIGTERM)
     epoc_streamer.send_signal(signal.SIGTERM)
     iaf_node.send_signal(signal.SIGTERM)
     dispatcher.send_signal(signal.SIGTERM)
-    ui.send_signal(signal.SIGTERM)
+    ui_proc.send_signal(signal.SIGTERM)
+    ui.close()
     
 
 

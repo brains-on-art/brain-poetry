@@ -19,24 +19,24 @@ class PoemClient(object):
 
     def __init__(self, port=5556):
         self.context = zmq.Context()
-        self.socket  = context.socket(zmq.REQ)
-        self.socket.bind("tcp://127.0.0.1:{}".format(port))
+        self.socket  = self.context.socket(zmq.REQ)
+        self.socket.connect("tcp://127.0.0.1:{}".format(port))
 
     def generate_poem(self, language, category):
         request = {}
         request['command']  = 'generate_poem'
         request['language'] = language
         request['category'] = category
-        socket.send_json(request)
+        self.socket.send_json(request)
 
-        return socket.recv_json()
+        return self.socket.recv_json()
 
     def get_poem(self):
         request = {}
         request['command'] = 'get_poem'
-        socket.send_json(request)
+        self.socket.send_json(request)
 
-        return socket.recv_json()
+        return self.socket.recv_json()
 
 
 

@@ -45,8 +45,8 @@ class IAFNode(BaseNode):
             alpha_pxx = scipy.signal.detrend(alpha_pxx)
             # iaf[ch] = alpha_pxx.shape
             iaf[ch] = freqs[alpha_mask][np.argmax(alpha_pxx)]
-        iaf = iaf.mean()
-        bin = np.digitize((iaf,), np.linspace(8,12, bins+1))
+        iaf = float(np.mean(iaf))
+        bin = int(np.digitize((iaf,), np.linspace(8,12, bins+1)))
         return (bin, iaf)
         
         
