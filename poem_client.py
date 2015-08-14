@@ -17,10 +17,12 @@ class PoemClient(object):
     API_VERSION = '0.1'
     API_DATE    = '2015-08-12'
 
-    def __init__(self, port=5556):
+    def __init__(self, host='127.0.0.1', port=5556):
+        self.host = host
+        self.port = port
         self.context = zmq.Context()
         self.socket  = self.context.socket(zmq.REQ)
-        self.socket.connect("tcp://127.0.0.1:{}".format(port))
+        self.socket.connect("tcp://{}:{}".format(host,port))
 
     def generate_poem(self, language, category):
         request = {}
