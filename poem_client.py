@@ -1,14 +1,10 @@
 import time
 import zmq
+from poem_server import DEFAULT_PORT
 
-#port = 5556
-
-#print('Connecting to server....')
-#context = zmq.Context()
-#socket  = context.socket(zmq.REQ)
-#socket.connect("tcp://127.0.0.1:{}".format(port))
 
 # Logging helpers FIXME: move to utility library
+file_time_str = lambda: time.strftime('%Y-%m-%d_%H-%M-%S',time.localtime())
 time_str = lambda: time.strftime('%Y-%m-%d %H:%M:%S',time.localtime())
 log_msg = lambda msg: print('{}: {}'.format(time_str(), msg))
 
@@ -17,7 +13,7 @@ class PoemClient(object):
     API_VERSION = '0.1'
     API_DATE    = '2015-08-12'
 
-    def __init__(self, host='127.0.0.1', port=5556):
+    def __init__(self, host='127.0.0.1', port=DEFAULT_PORT):
         self.host = host
         self.port = port
         self.context = zmq.Context()
@@ -40,29 +36,13 @@ class PoemClient(object):
 
         return self.socket.recv_json()
 
+    def get_api(self):
+        request = {}
+        request['command'] = 'get_api'
+        self.socket.send_json(request)
 
+        return self.socket.recv_json()
 
-
-def test(port):
-    log_msg('Connecting to server on port {}....'.format(port))
-    context = zmq.Context()
-    socket  = context.socket(zmq.REQ)
-    socket.connect("tcp://127.0.0.1:{}".format(port))
-
-    server.send_signal(signal.SIGINT)
-    server_log.close()
-
-def start_server(port):
-    log_msg('Starting server subprocess on port {}...'.format(port))
-    import os
-    import subprocess
-    server_log = time_str + '_poem_server_test.log'
-    server = subprocess.Popen(['python3',os.path.realpath(__file__), '--port', port], stdout=server_log)
-
-
-if __name__ == '__main__':
-    pass
-    
 
 def test_malformed_request(socket, request=None):
     if request is not None:
@@ -71,32 +51,52 @@ def test_malformed_request(socket, request=None):
         bad_request = {}
         bad_request['command'] = 'malformed'
         bad_request['content'] = 'FOOBAR'
-    print('Sending malformed request: {}'.format(bad_request))
+    log_msg('Sending malformed request: {}'.format(bad_request))
     socket.send_json(bad_request)
 
-    print('Waiting for response...')
+    log_msg('Waiting for response...')
     response = socket.recv_json()
-    print('Got response: {}'.format(response))
+    log_msg('Got response: {}'.format(response))
 
-def test_request(socket, language, category):
-    generate_request = {}
-    generate_request['command'] = 'generate_poem'
-    generate_request['language'] = language
-    generate_request['category'] = category
-    print('Sending generate_poem request: {}'.format(generate_request))
-    socket.send_json(generate_request)
 
-    print('Waiting for response...')
-    response = socket.recv_json()
-    print('Got response: {}'.format(response))
-        
-    get_request = {}
-    get_request['command'] = 'get_poem'
-    print('Sending get_poem request: {}'.format(get_request))
 
-    print('Waiting for response...')
-    response = socket.recv_json()
-    print('Got response: {}'.format(response))
+def test(port=DEFAULT_PORT):
+    import os
+    import signal
+    import subprocess
+    log_msg('Starting server subprocess on port {}...'.format(port))
+    server_log = open(file_time_str() + '_poem_server_test.log', 'w')
+    server_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'poem_server.py') 
+    server = subprocess.Popen(['python3', server_path, '--port', str(port)], stdout=server_log)
+    
+    log_msg('Starting client on port {}...'.format(port))
+    client = PoemClient(port=port)
+
+    log_msg('Getting server API...')
+    api_resp = client.get_api()
+    #log_msg('Got: {}'.format(api_resp))
+
+    log_msg('Available languages: {}'.format(api_resp['available_languages']))
+    log_msg('Iterating over available languages and requesting poems...')
+    for lang in api_resp['available_languages']:
+        log_msg('  {}:'.format(lang))
+        for cat in api_resp['available_categories'][lang]:
+            client.generate_poem(lang, cat)
+            time.sleep(1)
+            poem_resp = client.get_poem()
+            log_msg('    {}'.format(poem_resp['poem']))
+
+
+    test_malformed_request(client.socket)
+
+    log_msg('Stopping server subprocess...')
+    server.send_signal(signal.SIGINT)
+
+if __name__ == '__main__':
+    test()
+    
+
+
 
 
 

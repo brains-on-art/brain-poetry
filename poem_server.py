@@ -14,42 +14,63 @@ except ImportError: # Python2
 time_str = lambda: time.strftime('%Y-%m-%d %H:%M:%S',time.localtime())
 log_msg = lambda msg: print('{}: {}'.format(time_str(), msg))
 
+DEFAULT_PORT = 5556
+
+
+
 
 ## POETRY GENERATION ##########################################################
 
-# FIXME: NYT OIKEESTI!!!
-import sys
-#sys.path.append('../../apparatus/apparatus/')
-try:
-    from generate_poem import generate as get_poem_fi
-except ImportError:
-    log_msg('Finnish poem generation import error, using placeholder function...')
-    get_poem_fi = lambda category: 'Poem {} {}'.format('finnish', category)
-try:
-    from generate_poem_eng import generate as get_poem_en
-except ImportError:
-    log_msg('English poem generation import error, using placeholder function...')
-    get_poem_en = lambda category: 'Poem {} {}'.format('english', category)
-try:
-    from german_poetry_generation.german_poem import generate_german_poem as get_poem_de
-except:
-    log_msg('German poem generation import error, using placeholder function...')
-    get_poem_de = lambda category: 'Poem {} {}'.format('german', category)
+def get_generator(language):
+    if language == 'finnish':
+        try:
+            from generate_poem import generate as get_poem_fi
+        except ImportError:
+            log_msg('Finnish poem generation import error, using placeholder function...')
+            get_poem_fi = lambda category: 'Poem {} {}'.format('finnish', category)
+        return get_poem_fi
+    elif language == 'english':
+        try:
+            from generate_poem_eng import generate as get_poem_en
+        except ImportError:
+            log_msg('English poem generation import error, using placeholder function...')
+            get_poem_en = lambda category: 'Poem {} {}'.format('english', category)
+        return get_poem_en
+    elif language == 'german':
+        try:
+            from german_poetry_generation.german_poem import generate_german_poem as get_poem_de
+        except ImportError:
+            log_msg('German poem generation import error, using placeholder function...')
+            get_poem_de = lambda category: 'Poem {} {}'.format('german', category)
+        return get_poem_de
+    else:
+        log_msg('{} poem generation import error, using placeholder function...'.format(language.capitalize()))
+        get_poem_lang = lambda category: 'Poem {} {}'.format(language.capitalize(), category)
+        return get_poem_lang
+
+def get_categories(language):
+    if language == 'finnish':
+        return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] # FIXME
+    elif language == 'english':
+        return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] # FIXME
+    elif language == 'german':
+        return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] # FIXME
+    else:
+        return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] # FIXME
 
 
-# Poetry generators
-generators = {'finnish' : get_poem_fi,
-              'english' : get_poem_en,
-              'german'  : get_poem_en}
-categories = {'finnish' : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-              'english' : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-              'german'  : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
-assert generators.keys() == categories.keys(), 'Must specify both generator and categories for each language'
+class PoemGenerator(object):
+    languages = ['finnish', 'english', 'german']
+    # Poetry generators
+    def __init__(self):
+        self.generators = {lang:get_generator(lang) for lang in self.languages}
+        self.categories = {lang:get_categories(lang) for lang in self.languages}
+        self.poemgen_q = Queue() # FIXME: rename
+    
 
-poemgen_q = Queue()
-def generate_poem(language, category):
-    poem = generators[language](category) # get_poem_fi etc. 
-    poemgen_q.put((category, poem))
+    def generate_poem(self, language, category):
+        poem = self.generators[language](category) # get_poem_fi etc. 
+        self.poemgen_q.put((category, poem))
 
 
 ## API ########################################################################
@@ -59,6 +80,7 @@ class PoemServer(object):
     API_DATE    = '2015-08-12'
 
     def __init__(self, socket):
+        self.poem_generator = PoemGenerator()
         self.socket = socket
 
     # Create response dictionary
@@ -93,10 +115,10 @@ class PoemServer(object):
     def send_api(self, originating_request):
         api = self.create_response('api_info', 'API information', originating_request)
         api['available_commands']   = ['generate_poem', 'get_api', 'get_poem', 'help']
-        api['available_languages']  = generators.keys()
-        api['available_categories'] = categories
-        api['api_version']          = API_VERSION
-        api['api_date']             = API_DATE
+        api['available_languages']  = list(self.poem_generator.generators.keys())
+        api['available_categories'] = self.poem_generator.categories
+        api['api_version']          = self.API_VERSION
+        api['api_date']             = self.API_DATE
         log_msg('Sending API: {}'.format(api))
         self.socket.send_json(api)
 
@@ -107,8 +129,8 @@ class PoemServer(object):
             if request == {} or request['command'] in ['get_api', 'get_poem', 'help']:
                 pass
             elif request['command'] == 'generate_poem':       
-                if request['language'] not in generators.keys() or \
-                   request['category'] not in categories[request['language']]:
+                if request['language'] not in self.poem_generator.languages or \
+                   request['category'] not in self.poem_generator.categories[request['language']]:
                     good = False
             else:
                 good = False
@@ -123,7 +145,7 @@ class PoemServer(object):
             elif request['command'] == 'generate_poem': 
                 log_msg('Starting to generate poem in {} category {}'.format(request['language'], 
                                                                              request['category']))
-                poemgen_thr = Thread(target=generate_poem, 
+                poemgen_thr = Thread(target=self.poem_generator.generate_poem, 
                                      args=[request['language'], 
                                            request['category']])
                 poemgen_thr.start()
@@ -133,7 +155,7 @@ class PoemServer(object):
             elif request['command'] == 'get_poem': 
                 category, poem = None, None
                 try:
-                    category, poem = poemgen_q.get_nowait()
+                    category, poem = self.poem_generator.poemgen_q.get_nowait()
                     log_msg('Poem generated!')
                 except Empty:
                     pass
@@ -198,7 +220,7 @@ if __name__ == '__main__':
     # Parse arguments
     parser = argparse.ArgumentParser(description='Poem server')
     parser.add_argument('--test', action='store_true') 
-    parser.add_argument('--port', default=5556, type=int, help='Server port')
+    parser.add_argument('--port', default=DEFAULT_PORT, type=int, help='Server port')
 
     args = parser.parse_args()
 
