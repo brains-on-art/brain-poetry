@@ -222,6 +222,15 @@ class EPOCManager:
         self.active_epoc = None
         self.names = self.parse_config(config) if config != None else {}
 
+        # Create LSL outlet
+        info = lsl.StreamInfo('EPOC', #'EPOC-' + self.name,
+                              'EEG',
+                              NUM_EEG_CHANNELS,
+                              128,
+                              'float32',
+                              self.serial_number)
+        self.outlet = lsl.StreamOutlet(info)
+
         self.context = pyudev.Context()
 
         self.populate_devices()
@@ -234,17 +243,6 @@ class EPOCManager:
         self.monitor.filter_by('hidraw')
         self.observer = pyudev.MonitorObserver(self.monitor, self.add_event)
         self.observer.start()
-        # Create LSL outlet
-        info = lsl.StreamInfo('EPOC', #'EPOC-' + self.name,
-                              'EEG',
-                              NUM_EEG_CHANNELS,
-                              128,
-                              'float32',
-                              self.serial_number)
-        self.outlet = lsl.StreamOutlet(info)
-
-
-
 
     def parse_config(self, config):
         f = open(config, 'r')
