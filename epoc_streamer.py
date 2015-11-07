@@ -90,8 +90,9 @@ class EPOC:
             print('Receiving socket found. Proceeding to meaty part of mainloop')
         self.SENDADDR = ('localhost', 4333)
 
-    def connect(self, hidraw):
+    def connect(self, hidraw, outlet):
         self.hidraw_path = hidraw
+        self.outlet = outlet
         self.start()
 
     def disconnect(self):
@@ -108,6 +109,7 @@ class EPOC:
 
     def stop(self):
         print('Stopping')
+        self.outlet.__del__()
         gevent.kill(self.worker)
         os.close(self.hidraw)
 
@@ -126,14 +128,6 @@ class EPOC:
         #self.raw_eeg = np.ones_like(self.eeg)
         gyro    = np.zeros(2)
 
-        # Create LSL outlet
-        info = lsl.StreamInfo('EPOC', #'EPOC-' + self.name,
-                              'EEG',
-                              NUM_EEG_CHANNELS,
-                              128,
-                              'float32',
-                              self.serial_number)
-        outlet = lsl.StreamOutlet(info)
 
 
         sample = np.zeros(NUM_EEG_CHANNELS)
@@ -205,7 +199,7 @@ class EPOC:
                 self.last_packet_time = time.time()
                 if self.status != 'OK':
                     self.status = 'OK'
-                outlet.push_sample(eeg)
+                self.outlet.push_sample(eeg)
                 # Send things to processing
                 self.s.sendto(bytes('d'+','.join([str(x) for x in eeg[:5]*0.01]), 'UTF-8'),
                               self.SENDADDR)
@@ -240,6 +234,14 @@ class EPOCManager:
         self.monitor.filter_by('hidraw')
         self.observer = pyudev.MonitorObserver(self.monitor, self.add_event)
         self.observer.start()
+        # Create LSL outlet
+        info = lsl.StreamInfo('EPOC', #'EPOC-' + self.name,
+                              'EEG',
+                              NUM_EEG_CHANNELS,
+                              128,
+                              'float32',
+                              self.serial_number)
+        self.outlet = lsl.StreamOutlet(info)
 
 
     def parse_config(self, config):
@@ -277,7 +279,7 @@ class EPOCManager:
                 self.devices[hidraw_path] = serial_number
                 epoc = EPOC(serial_number)
                 self.epocs[serial_number] = epoc
-                epoc.connect(hidraw_path)
+                epoc.connect(hidraw_path, self.outlet)
                 print(serial_number, hidraw_path)
 
     def add_event(self, action, device):
@@ -298,10 +300,10 @@ class EPOCManager:
                         print('EPOC ({0}) added at {1}'.format(serial_number, hidraw_path))
                         self.devices[hidraw_path] = serial_number
                         if serial_number in self.epocs:
-                            self.epocs[serial_number].connect(hidraw_path)
+                            self.epocs[serial_number].connect(hidraw_path, self.outlet)
                         else:
                             epoc = EPOC(serial_number)
-                            epoc.connect(hidraw_path)
+                            epoc.connect(hidraw_path, self.outlet)
                             self.epocs[serial_number] = epoc
 
                 if action == 'remove':
