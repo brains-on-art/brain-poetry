@@ -242,6 +242,8 @@ class EPOCManager:
                               self.serial_number)
         self.outlet = lsl.StreamOutlet(info)
 
+        self.active_epoc = None
+
 
     def parse_config(self, config):
         f = open(config, 'r')
@@ -282,7 +284,6 @@ class EPOCManager:
                 print(serial_number, hidraw_path)
 
     def add_event(self, action, device):
-        #print action, device
         self.hidraw_event_queue.put((action, device))
 
     def process_events(self):
@@ -298,12 +299,14 @@ class EPOCManager:
                         hidraw_path = res[0]; serial_number = res[1]
                         print('EPOC ({0}) added at {1}'.format(serial_number, hidraw_path))
                         self.devices[hidraw_path] = serial_number
-                        if serial_number in self.epocs:
-                            self.epocs[serial_number].connect(hidraw_path, self.outlet)
-                        else:
+                        if serial_number not in self.epocs:
                             epoc = EPOC(serial_number)
-                            epoc.connect(hidraw_path, self.outlet)
                             self.epocs[serial_number] = epoc
+                        # Stop active epoc and make the connected one active
+                        if self.active_epoc is not None:
+                            self.active_epoc.disconnect()
+                        self.active_epoc = self.epocs[serial_number]
+                        self.active_epoc.connect(hidraw_path, self.outlet)
 
                 if action == 'remove':
                     hidraw_path = device.device_node
