@@ -280,8 +280,11 @@ class EPOCManager:
                 self.devices[hidraw_path] = serial_number
                 epoc = EPOC(serial_number)
                 self.epocs[serial_number] = epoc
-                epoc.connect(hidraw_path, self.outlet)
                 print(serial_number, hidraw_path)
+                if self.active_epoc is not None:
+                    self.active_epoc.disconnect()
+                self.active_epoc = self.epocs[serial_number]
+                self.active_epoc.connect(hidraw_path, self.outlet)
 
     def add_event(self, action, device):
         self.hidraw_event_queue.put((action, device))
@@ -311,11 +314,13 @@ class EPOCManager:
                 if action == 'remove':
                     hidraw_path = device.device_node
                     if hidraw_path in self.devices:
-                        self.epocs[self.devices[hidraw_path]].disconnect()
+                        if self.epocs[self.devices[hidraw_path]] is self.active_epoc:
+                            self.active_epoc.disconnect()
+                            # FIXME: Set other connected EPOC as connected
                         print('EPOC ({0}) at {1} removed'.format(self.devices[hidraw_path], hidraw_path))
                         del self.devices[hidraw_path]
 
-    def get_epoc(self,name):
+    def get_epoc(self, name):
         # Do we have an epoc by this name
         if name in self.names and self.names[name] in self.epocs:
             return self.epocs[self.names[name]]
