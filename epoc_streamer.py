@@ -109,7 +109,6 @@ class EPOC:
 
     def stop(self):
         print('Stopping')
-        self.outlet.__del__()
         gevent.kill(self.worker)
         os.close(self.hidraw)
 
