@@ -228,7 +228,7 @@ class EPOCManager:
                               NUM_EEG_CHANNELS,
                               128,
                               'float32',
-                              self.serial_number)
+                              'EPOC')
         self.outlet = lsl.StreamOutlet(info)
 
         self.context = pyudev.Context()
