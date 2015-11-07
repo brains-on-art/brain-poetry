@@ -219,6 +219,7 @@ class EPOCManager:
     def __init__(self, config=None):
         self.devices = {}
         self.epocs = {}
+        self.active_epoc = None
         self.names = self.parse_config(config) if config != None else {}
 
         self.context = pyudev.Context()
@@ -242,7 +243,7 @@ class EPOCManager:
                               self.serial_number)
         self.outlet = lsl.StreamOutlet(info)
 
-        self.active_epoc = None
+
 
 
     def parse_config(self, config):
@@ -285,6 +286,7 @@ class EPOCManager:
                     self.active_epoc.disconnect()
                 self.active_epoc = self.epocs[serial_number]
                 self.active_epoc.connect(hidraw_path, self.outlet)
+                print('Active EPOC is now SN:{}'.format(serial_number))
 
     def add_event(self, action, device):
         self.hidraw_event_queue.put((action, device))
